@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Data Penggunaan HP</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--tx:#1a2233;--mut:#6b7689;--ac:#2563eb;--ok:#16a34a;--bad:#dc2626;--bd:#e2e7ef}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1420;--card:#1a2132;--tx:#e8ecf5;--mut:#8f9ab0;--ac:#5b8def;--ok:#34d27b;--bad:#f06767;--bd:#2a3349}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:520px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 2px}
+.sub{color:var(--mut);font-size:14px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:12px}
+button{font:inherit;border:0;border-radius:10px;padding:11px 14px;background:var(--bd);color:var(--tx);cursor:pointer}
+button.p{background:var(--ac);color:#fff}
+button.out{background:var(--bad);color:#fff}
+input{font:inherit;width:100%;padding:11px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);margin-bottom:10px}
+video{width:100%;border-radius:12px;background:#000;aspect-ratio:4/3;object-fit:cover;transform:scaleX(-1);margin-bottom:10px}
+.row{display:flex;align-items:center;gap:10px}
+.row img{width:48px;height:48px;border-radius:50%;object-fit:cover;flex:none}
+.grow{flex:1;min-width:0}
+.nm{font-weight:600}
+.m,.note{color:var(--mut);font-size:13px}
+.badge{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--ok);color:#fff}
+.badge.d{background:var(--mut)}
+.timer{font-variant-numeric:tabular-nums;font-weight:600;color:var(--ok)}
+.hide{display:none}
+.stat{display:flex;gap:10px}.stat div{flex:1;text-align:center}.stat b{font-size:24px;display:block}
+footer{text-align:center;margin:20px 0 8px}
+footer a{color:var(--mut);font-size:12px;cursor:pointer}
+</style>
+</head>
+<body>
+<main>
+<h1>Data Penggunaan HP</h1>
+<p class="sub" id="today"></p>
+
+<section id="v1">
+  <div class="card">
+    <input id="name" placeholder="Nama pengguna" autocomplete="off">
+    <video id="vid" autoplay playsinline muted class="hide"></video>
+    <canvas id="cv" class="hide"></canvas>
+    <div id="msg" class="note" style="margin-bottom:10px">Isi nama, pilih Mulai atau Selesai, lalu scan wajah.</div>
+    <div class="row" id="btns"><button class="p grow" id="bIn">Mulai Pakai HP</button><button class="out grow" id="bOut">Selesai Pakai HP</button></div>
+    <button class="p hide" id="snap" style="width:100%">Ambil Foto Wajah</button>
+    <input id="fb" type="file" accept="image/*" capture="user" class="hide">
+  </div>
+</section>
+
+<section id="vl" class="hide">
+  <div class="card">
+    <b id="ltitle">Login Admin</b>
+    <input id="pw" type="password" inputmode="numeric" placeholder="PIN" style="margin-top:10px">
+    <div id="lmsg" class="note" style="margin-bottom:10px"></div>
+    <div class="row"><button class="p grow" id="dologin">Masuk</button><button id="cancel">Batal</button></div>
+  </div>
+</section>
+
+<section id="v2" class="hide">
+  <input type="date" id="dt">
+  <div class="card stat"><div><b id="sTot">0</b><span class="m">pengguna</span></div><div><b id="sAct">0</b><span class="m">masih memakai</span></div><div><b id="sDur">00:00</b><span class="m">total (jam:menit)</span></div></div>
+  <button id="logout" style="width:100%;margin-bottom:12px">Keluar dari Admin</button>
+  <div id="all"></div>
+</section>
+
+<footer><div class="note">Dibuat oleh Sultan Agung</div><a id="adm">Admin</a></footer>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const dayKey=()=>new Date().toLocaleDateString('sv');
+const hm=t=>new Date(t).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
+const dur=ms=>{const s=Math.max(0,Math.floor(ms/1000));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(n=>String(n).padStart(2,'0')).join(':')};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+$('today').textContent=new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+let logs=[],stream=null,armed=false,mode='in',isAdmin=false;
+try{logs=JSON.parse(localStorage.getItem('logs')||'[]')}catch(e){}
+const save=()=>{try{localStorage.setItem('logs',JSON.stringify(logs))}catch(e){$('msg').textContent='Penyimpanan penuh. Hubungi admin.'}};
+const show=v=>['v1','vl','v2'].forEach(x=>$(x).classList.toggle('hide',x!==v));
+async function hash(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('hp:'+s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+
+/* ---- admin (PIN dibuat sendiri, disimpan hanya sebagai hash di HP ini) ---- */
+const getPin=()=>{try{return localStorage.getItem('pin')}catch(e){return null}};
+$('adm').onclick=()=>{$('pw').value='';$('lmsg').textContent='';$('ltitle').textContent=getPin()?'Masukkan PIN admin':'Buat PIN admin baru (minimal 4 angka)';$('dologin').textContent=getPin()?'Masuk':'Simpan PIN';show('vl')};
+$('cancel').onclick=()=>show('v1');
+$('dologin').onclick=async()=>{
+  const v=$('pw').value.trim();
+  if(!getPin()){
+    if(!/^\d{4,}$/.test(v)){$('lmsg').textContent='PIN minimal 4 angka.';return}
+    try{localStorage.setItem('pin',await hash(v))}catch(e){}
+    openAdmin();
+  }else if(await hash(v)===getPin()){openAdmin()}
+  else $('lmsg').textContent='PIN salah.';
+};
+function openAdmin(){isAdmin=true;$('dt').value=dayKey();show('v2');render()}
+$('logout').onclick=()=>{isAdmin=false;show('v1')};
+$('dt').onchange=render;
+
+function row(l){
+  const act=!l.outAt;
+  return `<div class="card"><div class="row"><img src="${l.inImg||''}" alt=""><div class="grow"><div class="nm">${esc(l.name)}</div>
+  <div class="m">Mulai ${hm(l.inAt)}${act?'':' · Selesai '+hm(l.outAt)}</div></div>
+  <div style="text-align:right">${act?`<span class="badge">Aktif</span><div class="timer" data-t="${l.inAt}">${dur(Date.now()-l.inAt)}</div>`:`<span class="badge d">Selesai</span><div class="m">${dur(l.outAt-l.inAt)}</div>`}</div></div></div>`;
+}
+function render(){
+  if(!isAdmin)return;
+  const d=$('dt').value||dayKey(),list=logs.filter(l=>l.day===d).sort((a,b)=>b.inAt-a.inAt);
+  $('all').innerHTML=list.length?list.map(row).join(''):'<div class="note" style="padding:0 4px">Belum ada data di tanggal ini.</div>';
+  $('sTot').textContent=list.length;
+  $('sAct').textContent=list.filter(l=>!l.outAt).length;
+  $('sDur').textContent=dur(list.reduce((s,l)=>s+((l.outAt||Date.now())-l.inAt),0)).slice(0,5);
+}
+setInterval(()=>document.querySelectorAll('.timer').forEach(e=>e.textContent=dur(Date.now()-e.dataset.t)),1000);
+
+/* ---- kamera ---- */
+async function openCam(){
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});$('vid').srcObject=stream;$('vid').classList.remove('hide');return true}
+  catch(e){return false}
+}
+function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$('vid').classList.add('hide');$('snap').classList.add('hide');$('btns').classList.remove('hide');armed=false}
+function grab(src,w,h){const c=$('cv'),W=170,H=Math.round(W*h/w);c.width=W;c.height=H;c.getContext('2d').drawImage(src,0,0,W,H);return c.toDataURL('image/jpeg',.5)}
+
+const findActive=()=>{const n=$('name').value.trim().toLowerCase();return logs.slice().reverse().find(l=>!l.outAt&&l.name.toLowerCase()===n)};
+async function begin(m){
+  mode=m;
+  if(!$('name').value.trim()){$('msg').textContent='Isi nama dulu.';return}
+  if(m==='out'&&!findActive()){$('msg').textContent='Tidak ada pemakaian aktif atas nama itu. Cek ejaan nama.';return}
+  if(await openCam()){armed=true;$('btns').classList.add('hide');$('snap').classList.remove('hide');$('msg').textContent='Hadapkan wajah ke kamera, lalu tekan Ambil Foto Wajah.'}
+  else $('fb').click();
+}
+$('bIn').onclick=()=>begin('in');
+$('bOut').onclick=()=>begin('out');
+$('snap').onclick=()=>{const v=$('vid'),img=grab(v,v.videoWidth||640,v.videoHeight||480);stopCam();finish(img)};
+$('fb').onchange=e=>{const f=e.target.files[0];if(!f)return;const im=new Image();im.onload=()=>{finish(grab(im,im.width,im.height));URL.revokeObjectURL(im.src)};im.src=URL.createObjectURL(f);e.target.value=''};
+
+function finish(img){
+  const now=Date.now(),name=$('name').value.trim();
+  if(mode==='in'){
+    logs.push({id:'s'+now,name,day:dayKey(),inAt:now,inImg:img,outAt:null,outImg:null});
+    $('msg').textContent='Pemakaian dimulai pukul '+hm(now)+'. Jangan lupa tekan Selesai Pakai HP setelah selesai.';
+  }else{
+    const l=findActive();if(!l){$('msg').textContent='Data tidak ditemukan.';return}
+    l.outAt=now;l.outImg=img;
+    $('msg').textContent='Pemakaian selesai pukul '+hm(now)+'. Terima kasih.';
+  }
+  save();$('name').value='';
+}
+</script>
+</body>
+</html>
